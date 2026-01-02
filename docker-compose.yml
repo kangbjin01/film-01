@@ -9,7 +9,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_POCKETBASE_URL=http://pocketbase:8090
+      # Coolify에서 이 값을 외부 PocketBase URL로 덮어씁니다
+      # 예: https://api.your-domain.com
+      - NEXT_PUBLIC_POCKETBASE_URL=${NEXT_PUBLIC_POCKETBASE_URL:-http://localhost:8090}
     depends_on:
       - pocketbase
     restart: unless-stopped
