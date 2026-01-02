@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import pb, { COLLECTIONS } from '@/lib/pocketbase';
 import type {
   DailySchedule,
   DailyScheduleFormData,
@@ -11,7 +10,7 @@ import type {
   CastSchedule,
   Cast,
 } from '@/types';
-import { calculateTimeFromDuration, formatTime } from '@/lib/timeUtils';
+import { calculateTimeFromDuration } from '@/lib/timeUtils';
 
 interface ScheduleState {
   schedules: DailySchedule[];
@@ -44,11 +43,11 @@ interface ScheduleState {
   updateTimelineItem: (id: string, data: Partial<TimelineItemFormData>) => Promise<void>;
   deleteTimelineItem: (id: string) => Promise<void>;
   
-  // Department Details
+  // Department Details (현재 미사용)
   fetchDepartmentDetails: (scheduleId: string) => Promise<void>;
   saveDepartmentDetail: (data: Omit<DepartmentDetail, 'id' | 'created' | 'updated'>) => Promise<void>;
   
-  // Cast Schedules
+  // Cast Schedules (현재 미사용)
   fetchCastSchedules: (scheduleId: string) => Promise<void>;
   saveCastSchedule: (data: Omit<CastSchedule, 'id' | 'created' | 'updated'>) => Promise<void>;
   deleteCastSchedule: (id: string) => Promise<void>;
@@ -72,11 +71,10 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   fetchSchedules: async (projectId: string) => {
     set({ isLoading: true, error: null });
     try {
-      const records = await pb.collection(COLLECTIONS.SCHEDULES).getFullList<DailySchedule>({
-        filter: `projectId = "${projectId}"`,
-        sort: '-shootingDate',
-      });
-      set({ schedules: records, isLoading: false });
+      const res = await fetch(`/api/projects/${projectId}/schedules`);
+      if (!res.ok) throw new Error('Failed to fetch schedules');
+      const data = await res.json();
+      set({ schedules: data, isLoading: false });
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });
     }
@@ -85,16 +83,22 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   fetchSchedule: async (id: string) => {
     set({ isLoading: true, error: null });
     try {
-      const record = await pb.collection(COLLECTIONS.SCHEDULES).getOne<DailySchedule>(id);
-      set({ currentSchedule: record, isLoading: false });
+      const res = await fetch(`/api/schedules/${id}`);
+      if (!res.ok) throw new Error('Failed to fetch schedule');
+      const data = await res.json();
       
-      // 관련 데이터 로드 (존재하지 않는 컬렉션은 무시)
-      await Promise.all([
-        get().fetchScenes(id),
-        get().fetchTimeline(id),
-        get().fetchDepartmentDetails(id).catch(() => {}),
-        get().fetchCastSchedules(id).catch(() => {}),
-      ]);
+      // 응답에 scenes와 timeline이 포함되어 있음
+      const scenesWithCuts = (data.scenes || []).map((scene: Scene) => ({
+        ...scene,
+        cuts: scene.cuts || [],
+      }));
+      
+      set({
+        currentSchedule: data,
+        scenes: scenesWithCuts,
+        timeline: data.timeline || [],
+        isLoading: false,
+      });
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });
     }
@@ -103,7 +107,13 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   createSchedule: async (data: DailyScheduleFormData) => {
     set({ isLoading: true, error: null });
     try {
-      const record = await pb.collection(COLLECTIONS.SCHEDULES).create<DailySchedule>(data);
+      const res = await fetch(`/api/projects/${data.projectId}/schedules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to create schedule');
+      const record = await res.json();
       set((state) => ({
         schedules: [record, ...state.schedules],
         isLoading: false,
@@ -118,7 +128,13 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   updateSchedule: async (id: string, data: Partial<DailyScheduleFormData>) => {
     set({ isLoading: true, error: null });
     try {
-      const record = await pb.collection(COLLECTIONS.SCHEDULES).update<DailySchedule>(id, data);
+      const res = await fetch(`/api/schedules/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to update schedule');
+      const record = await res.json();
       set((state) => ({
         schedules: state.schedules.map((s) => (s.id === id ? record : s)),
         currentSchedule: state.currentSchedule?.id === id ? record : state.currentSchedule,
@@ -133,7 +149,8 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   deleteSchedule: async (id: string) => {
     set({ isLoading: true, error: null });
     try {
-      await pb.collection(COLLECTIONS.SCHEDULES).delete(id);
+      const res = await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete schedule');
       set((state) => ({
         schedules: state.schedules.filter((s) => s.id !== id),
         currentSchedule: state.currentSchedule?.id === id ? null : state.currentSchedule,
@@ -148,12 +165,10 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   // Scene methods
   fetchScenes: async (scheduleId: string) => {
     try {
-      const records = await pb.collection(COLLECTIONS.SCENES).getFullList<Scene>({
-        filter: `scheduleId = "${scheduleId}"`,
-        sort: 'order',
-      });
-      // cuts 필드가 없는 기존 데이터 호환성 처리
-      const scenesWithCuts = records.map(scene => ({
+      const res = await fetch(`/api/schedules/${scheduleId}/scenes`);
+      if (!res.ok) throw new Error('Failed to fetch scenes');
+      const data = await res.json();
+      const scenesWithCuts = data.map((scene: Scene) => ({
         ...scene,
         cuts: scene.cuts || [],
       }));
@@ -164,9 +179,14 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   },
   
   createScene: async (data: SceneFormData) => {
-    // cuts가 없으면 빈 배열 추가
     const dataWithCuts = { ...data, cuts: data.cuts || [] };
-    const record = await pb.collection(COLLECTIONS.SCENES).create<Scene>(dataWithCuts);
+    const res = await fetch(`/api/schedules/${data.scheduleId}/scenes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dataWithCuts),
+    });
+    if (!res.ok) throw new Error('Failed to create scene');
+    const record = await res.json();
     const recordWithCuts = { ...record, cuts: record.cuts || [] };
     set((state) => ({
       scenes: [...state.scenes, recordWithCuts].sort((a, b) => a.order - b.order),
@@ -175,7 +195,13 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   },
   
   updateScene: async (id: string, data: Partial<SceneFormData>) => {
-    const record = await pb.collection(COLLECTIONS.SCENES).update<Scene>(id, data);
+    const res = await fetch(`/api/scenes/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to update scene');
+    const record = await res.json();
     const recordWithCuts = { ...record, cuts: record.cuts || [] };
     set((state) => ({
       scenes: state.scenes.map((s) => (s.id === id ? recordWithCuts : s)),
@@ -183,7 +209,8 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   },
   
   deleteScene: async (id: string) => {
-    await pb.collection(COLLECTIONS.SCENES).delete(id);
+    const res = await fetch(`/api/scenes/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete scene');
     set((state) => ({
       scenes: state.scenes.filter((s) => s.id !== id),
     }));
@@ -195,11 +222,14 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
     
     // 서버에 순서 업데이트
     try {
-      await Promise.all(
-        scenes.map((scene, index) =>
-          pb.collection(COLLECTIONS.SCENES).update(scene.id, { order: index })
-        )
-      );
+      const res = await fetch('/api/scenes/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scenes: scenes.map((scene, index) => ({ id: scene.id, order: index })),
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to reorder scenes');
     } catch (error) {
       console.error('Failed to reorder scenes:', error);
     }
@@ -227,18 +257,23 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   // Timeline methods
   fetchTimeline: async (scheduleId: string) => {
     try {
-      const records = await pb.collection(COLLECTIONS.TIMELINE).getFullList<TimelineItem>({
-        filter: `scheduleId = "${scheduleId}"`,
-        sort: 'order',
-      });
-      set({ timeline: records });
+      const res = await fetch(`/api/schedules/${scheduleId}/timeline`);
+      if (!res.ok) throw new Error('Failed to fetch timeline');
+      const data = await res.json();
+      set({ timeline: data });
     } catch (error) {
       console.error('Failed to fetch timeline:', error);
     }
   },
   
   createTimelineItem: async (data: TimelineItemFormData) => {
-    const record = await pb.collection(COLLECTIONS.TIMELINE).create<TimelineItem>(data);
+    const res = await fetch(`/api/schedules/${data.scheduleId}/timeline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to create timeline item');
+    const record = await res.json();
     set((state) => ({
       timeline: [...state.timeline, record].sort((a, b) => a.order - b.order),
     }));
@@ -246,105 +281,46 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   },
   
   updateTimelineItem: async (id: string, data: Partial<TimelineItemFormData>) => {
-    const record = await pb.collection(COLLECTIONS.TIMELINE).update<TimelineItem>(id, data);
+    const res = await fetch(`/api/timeline/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to update timeline item');
+    const record = await res.json();
     set((state) => ({
       timeline: state.timeline.map((t) => (t.id === id ? record : t)),
     }));
   },
   
   deleteTimelineItem: async (id: string) => {
-    await pb.collection(COLLECTIONS.TIMELINE).delete(id);
+    const res = await fetch(`/api/timeline/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete timeline item');
     set((state) => ({
       timeline: state.timeline.filter((t) => t.id !== id),
     }));
   },
   
-  // Department Details
-  fetchDepartmentDetails: async (scheduleId: string) => {
-    try {
-      const records = await pb.collection(COLLECTIONS.DEPARTMENT_DETAILS).getFullList<DepartmentDetail>({
-        filter: `scheduleId = "${scheduleId}"`,
-      });
-      set({ departmentDetails: records });
-    } catch (error) {
-      console.error('Failed to fetch department details:', error);
-    }
+  // Department Details (현재 미사용 - 나중에 필요시 API 추가)
+  fetchDepartmentDetails: async () => {
+    set({ departmentDetails: [] });
   },
   
-  saveDepartmentDetail: async (data) => {
-    const { departmentDetails } = get();
-    const existing = departmentDetails.find(
-      (d) => d.scheduleId === data.scheduleId && d.department === data.department
-    );
-    
-    if (existing) {
-      const record = await pb.collection(COLLECTIONS.DEPARTMENT_DETAILS).update<DepartmentDetail>(
-        existing.id,
-        data
-      );
-      set((state) => ({
-        departmentDetails: state.departmentDetails.map((d) =>
-          d.id === existing.id ? record : d
-        ),
-      }));
-    } else {
-      const record = await pb.collection(COLLECTIONS.DEPARTMENT_DETAILS).create<DepartmentDetail>(data);
-      set((state) => ({
-        departmentDetails: [...state.departmentDetails, record],
-      }));
-    }
+  saveDepartmentDetail: async () => {
+    // 미구현
   },
   
-  // Cast Schedules
-  fetchCastSchedules: async (scheduleId: string) => {
-    try {
-      const records = await pb.collection(COLLECTIONS.CAST_SCHEDULES).getFullList<CastSchedule>({
-        filter: `scheduleId = "${scheduleId}"`,
-        expand: 'castId',
-      });
-      
-      const withCast = records.map((record) => ({
-        ...record,
-        cast: (record as any).expand?.castId as Cast | undefined,
-      }));
-      
-      set({ castSchedules: withCast });
-    } catch (error) {
-      console.error('Failed to fetch cast schedules:', error);
-    }
+  // Cast Schedules (현재 미사용 - 나중에 필요시 API 추가)
+  fetchCastSchedules: async () => {
+    set({ castSchedules: [] });
   },
   
-  saveCastSchedule: async (data) => {
-    const { castSchedules } = get();
-    const existing = castSchedules.find(
-      (cs) => cs.scheduleId === data.scheduleId && cs.castId === data.castId
-    );
-    
-    if (existing) {
-      const record = await pb.collection(COLLECTIONS.CAST_SCHEDULES).update<CastSchedule>(
-        existing.id,
-        data
-      );
-      set((state) => ({
-        castSchedules: state.castSchedules.map((cs) =>
-          cs.id === existing.id ? { ...record, cast: cs.cast } : cs
-        ),
-      }));
-    } else {
-      const record = await pb.collection(COLLECTIONS.CAST_SCHEDULES).create<CastSchedule>(data);
-      // Cast 정보 가져오기
-      const cast = await pb.collection(COLLECTIONS.CASTS).getOne<Cast>(data.castId);
-      set((state) => ({
-        castSchedules: [...state.castSchedules, { ...record, cast }],
-      }));
-    }
+  saveCastSchedule: async () => {
+    // 미구현
   },
   
-  deleteCastSchedule: async (id: string) => {
-    await pb.collection(COLLECTIONS.CAST_SCHEDULES).delete(id);
-    set((state) => ({
-      castSchedules: state.castSchedules.filter((cs) => cs.id !== id),
-    }));
+  deleteCastSchedule: async () => {
+    // 미구현
   },
   
   // Local state
@@ -362,4 +338,3 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
     });
   },
 }));
-

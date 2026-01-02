@@ -1,33 +1,54 @@
 version: "3.8"
 
 services:
-  # Next.js Frontend
-  frontend:
+  # Next.js Application (Frontend + API)
+  app:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
     environment:
-      # Coolify에서 이 값을 외부 PocketBase URL로 덮어씁니다
-      # 예: https://api.your-domain.com
-      - NEXT_PUBLIC_POCKETBASE_URL=${NEXT_PUBLIC_POCKETBASE_URL:-http://localhost:8090}
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/filmsheet?schema=public
     depends_on:
-      - pocketbase
+      db:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - film-sheet-network
 
-  # PocketBase Backend
-  pocketbase:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=filmsheet
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - film-sheet-network
+    # 외부 포트 노출하지 않음 (보안)
+    # ports:
+    #   - "5432:5432"
+
+  # Database Migration Runner (한 번만 실행)
+  migrate:
     build:
       context: .
-      dockerfile: Dockerfile.pocketbase
-    ports:
-      - "8090:8090"
-    volumes:
-      - pocketbase_data:/pb/pb_data
-    restart: unless-stopped
+      dockerfile: Dockerfile
+    command: npx prisma migrate deploy
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/filmsheet?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - film-sheet-network
 
@@ -36,5 +57,4 @@ networks:
     driver: bridge
 
 volumes:
-  pocketbase_data:
-
+  postgres_data:

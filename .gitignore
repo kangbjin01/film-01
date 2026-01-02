@@ -36,9 +36,12 @@ yarn-error.log*
 *.swo
 .DS_Store
 
-# PocketBase data (로컬 개발용 데이터는 커밋하지 않음)
-backend/pb_data/
-backend/pocketbase.exe
+# Database
+*.db
+*.sqlite
+
+# Prisma
+prisma/migrations/*_migration_lock.toml
 
 # OS
 Thumbs.db
@@ -52,3 +55,5 @@ Thumbs.db
 
 # Misc
 *.pem
+
+/src/generated/prisma

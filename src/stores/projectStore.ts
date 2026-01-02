@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import pb, { COLLECTIONS } from '@/lib/pocketbase';
 import type { Project, ProjectFormData, Staff, Cast } from '@/types';
 
 interface ProjectState {
@@ -42,10 +41,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   fetchProjects: async () => {
     set({ isLoading: true, error: null });
     try {
-      const records = await pb.collection(COLLECTIONS.PROJECTS).getFullList<Project>({
-        sort: '-created',
-      });
-      set({ projects: records, isLoading: false });
+      const res = await fetch('/api/projects');
+      if (!res.ok) throw new Error('Failed to fetch projects');
+      const data = await res.json();
+      set({ projects: data, isLoading: false });
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });
     }
@@ -54,20 +53,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   fetchProject: async (id: string) => {
     set({ isLoading: true, error: null });
     try {
-      const record = await pb.collection(COLLECTIONS.PROJECTS).getOne<Project>(id);
-      set({ currentProject: record, isLoading: false });
+      const res = await fetch(`/api/projects/${id}`);
+      if (!res.ok) throw new Error('Failed to fetch project');
+      const data = await res.json();
+      set({ currentProject: data, isLoading: false });
       
-      // 스태프와 캐스트도 함께 로드 (컬렉션이 없어도 에러 무시)
-      try {
-        await get().fetchStaff(id);
-      } catch (e) {
-        console.log('Staff collection not available');
-      }
-      try {
-        await get().fetchCasts(id);
-      } catch (e) {
-        console.log('Casts collection not available');
-      }
+      // 스태프와 캐스트도 함께 로드
+      await Promise.all([
+        get().fetchStaff(id),
+        get().fetchCasts(id),
+      ]);
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });
     }
@@ -76,7 +71,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   createProject: async (data: ProjectFormData) => {
     set({ isLoading: true, error: null });
     try {
-      const record = await pb.collection(COLLECTIONS.PROJECTS).create<Project>(data);
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to create project');
+      const record = await res.json();
       set((state) => ({
         projects: [record, ...state.projects],
         isLoading: false,
@@ -91,7 +92,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   updateProject: async (id: string, data: Partial<ProjectFormData>) => {
     set({ isLoading: true, error: null });
     try {
-      const record = await pb.collection(COLLECTIONS.PROJECTS).update<Project>(id, data);
+      const res = await fetch(`/api/projects/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to update project');
+      const record = await res.json();
       set((state) => ({
         projects: state.projects.map((p) => (p.id === id ? record : p)),
         currentProject: state.currentProject?.id === id ? record : state.currentProject,
@@ -106,7 +113,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   deleteProject: async (id: string) => {
     set({ isLoading: true, error: null });
     try {
-      await pb.collection(COLLECTIONS.PROJECTS).delete(id);
+      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete project');
       set((state) => ({
         projects: state.projects.filter((p) => p.id !== id),
         currentProject: state.currentProject?.id === id ? null : state.currentProject,
@@ -125,31 +133,43 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // Staff methods
   fetchStaff: async (projectId: string) => {
     try {
-      const records = await pb.collection(COLLECTIONS.STAFF).getFullList<Staff>({
-        filter: `projectId = "${projectId}"`,
-        sort: 'department,position',
-      });
-      set({ staff: records });
+      const res = await fetch(`/api/projects/${projectId}/staff`);
+      if (!res.ok) throw new Error('Failed to fetch staff');
+      const data = await res.json();
+      set({ staff: data });
     } catch (error) {
       console.error('Failed to fetch staff:', error);
     }
   },
   
   createStaff: async (data) => {
-    const record = await pb.collection(COLLECTIONS.STAFF).create<Staff>(data);
+    const res = await fetch(`/api/projects/${data.projectId}/staff`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to create staff');
+    const record = await res.json();
     set((state) => ({ staff: [...state.staff, record] }));
     return record;
   },
   
   updateStaff: async (id: string, data) => {
-    const record = await pb.collection(COLLECTIONS.STAFF).update<Staff>(id, data);
+    const res = await fetch(`/api/staff/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to update staff');
+    const record = await res.json();
     set((state) => ({
       staff: state.staff.map((s) => (s.id === id ? record : s)),
     }));
   },
   
   deleteStaff: async (id: string) => {
-    await pb.collection(COLLECTIONS.STAFF).delete(id);
+    const res = await fetch(`/api/staff/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete staff');
     set((state) => ({
       staff: state.staff.filter((s) => s.id !== id),
     }));
@@ -158,34 +178,45 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // Cast methods
   fetchCasts: async (projectId: string) => {
     try {
-      const records = await pb.collection(COLLECTIONS.CASTS).getFullList<Cast>({
-        filter: `projectId = "${projectId}"`,
-        sort: 'role',
-      });
-      set({ casts: records });
+      const res = await fetch(`/api/projects/${projectId}/casts`);
+      if (!res.ok) throw new Error('Failed to fetch casts');
+      const data = await res.json();
+      set({ casts: data });
     } catch (error) {
       console.error('Failed to fetch casts:', error);
     }
   },
   
   createCast: async (data) => {
-    const record = await pb.collection(COLLECTIONS.CASTS).create<Cast>(data);
+    const res = await fetch(`/api/projects/${data.projectId}/casts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to create cast');
+    const record = await res.json();
     set((state) => ({ casts: [...state.casts, record] }));
     return record;
   },
   
   updateCast: async (id: string, data) => {
-    const record = await pb.collection(COLLECTIONS.CASTS).update<Cast>(id, data);
+    const res = await fetch(`/api/casts/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to update cast');
+    const record = await res.json();
     set((state) => ({
       casts: state.casts.map((c) => (c.id === id ? record : c)),
     }));
   },
   
   deleteCast: async (id: string) => {
-    await pb.collection(COLLECTIONS.CASTS).delete(id);
+    const res = await fetch(`/api/casts/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete cast');
     set((state) => ({
       casts: state.casts.filter((c) => c.id !== id),
     }));
   },
 }));
-

@@ -7,7 +7,7 @@
 - **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS
 - **UI Components**: shadcn/ui, Radix UI
 - **State Management**: Zustand
-- **Backend**: PocketBase
+- **Database**: PostgreSQL + Prisma ORM
 - **PDF Export**: jsPDF, jspdf-autotable
 - **Excel Export**: xlsx
 - **Drag & Drop**: dnd-kit
@@ -29,20 +29,30 @@
 npm install
 ```
 
-### 2. PocketBase 설정
+### 2. 환경변수 설정
 
-PocketBase를 다운로드하고 `backend` 폴더에 배치합니다:
+`.env` 파일을 생성하고 DATABASE_URL을 설정합니다:
 
 ```bash
-# Windows
-cd backend
-# pocketbase.exe를 다운로드하여 이 폴더에 배치
-./pocketbase.exe serve
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/filmsheet?schema=public"
 ```
 
-PocketBase Admin UI (http://127.0.0.1:8090/_/) 에서 초기 관리자 계정을 생성합니다.
+### 3. 데이터베이스 설정
 
-### 3. 개발 서버 실행
+PostgreSQL이 실행 중이어야 합니다. Docker를 사용하면 편리합니다:
+
+```bash
+# PostgreSQL 컨테이너 실행
+docker run --name filmsheet-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=filmsheet -p 5432:5432 -d postgres:16-alpine
+```
+
+### 4. 데이터베이스 마이그레이션
+
+```bash
+npx prisma migrate dev
+```
+
+### 5. 개발 서버 실행
 
 ```bash
 npm run dev
@@ -58,62 +68,79 @@ http://localhost:3000 에서 앱을 확인합니다.
 docker-compose up -d
 ```
 
-- Frontend: http://localhost:3000
-- PocketBase: http://localhost:8090
+이 명령어는 다음을 자동으로 설정합니다:
+- Next.js 앱 (포트 3000)
+- PostgreSQL 데이터베이스 (내부에서만 접근)
+- 데이터베이스 마이그레이션
 
 ## ☁️ Coolify 배포
 
-### 방법 1: Docker Compose (권장)
+### 1. Docker Compose로 배포 (권장)
 
 1. Coolify에서 새 프로젝트 생성
-2. "Docker Compose" 리소스 추가
+2. **+ Add** → **Docker Compose** 선택
 3. GitHub 레포지토리 연결
 4. `docker-compose.yml` 파일이 자동으로 감지됨
-5. 환경변수 설정:
-   - `NEXT_PUBLIC_POCKETBASE_URL`: PocketBase 서비스 URL
+5. **Deploy** 클릭
 
-### 방법 2: 개별 서비스 배포
+### 2. 환경변수 (자동 설정됨)
 
-#### Frontend (Next.js)
-1. "Docker" 리소스 추가
-2. Dockerfile: `Dockerfile`
-3. 포트: `3000`
-4. 환경변수: `NEXT_PUBLIC_POCKETBASE_URL`
+Docker Compose를 사용하면 `DATABASE_URL`이 자동으로 설정됩니다.
+별도의 환경변수 설정이 필요하지 않습니다.
 
-#### Backend (PocketBase)
-1. "Docker" 리소스 추가
-2. Dockerfile: `Dockerfile.pocketbase`
-3. 포트: `8090`
-4. 볼륨: `/pb/pb_data` (데이터 영속성)
+### 3. 하나의 도메인만 필요!
 
-### 환경변수
+```
+사용자 브라우저
+    ↓
+https://your-domain.com (Next.js + API + DB)
+```
 
-| 변수명 | 설명 | 예시 |
-|--------|------|------|
-| `NEXT_PUBLIC_POCKETBASE_URL` | PocketBase API URL | `https://api.your-domain.com` |
+PostgreSQL은 외부에 노출되지 않고, Next.js API Routes를 통해서만 접근합니다.
 
 ## 📁 프로젝트 구조
 
 ```
 film-sheet/
-├── backend/
-│   ├── pb_migrations/    # PocketBase 마이그레이션
-│   └── pocketbase.exe    # PocketBase 실행 파일 (로컬용)
+├── prisma/
+│   └── schema.prisma     # 데이터베이스 스키마
 ├── public/
 │   └── fonts/            # 한글 폰트 (Pretendard)
 ├── src/
-│   ├── app/              # Next.js App Router 페이지
+│   ├── app/
+│   │   ├── api/          # API Routes (서버 사이드)
+│   │   └── ...           # 페이지 컴포넌트
 │   ├── components/       # React 컴포넌트
 │   │   ├── layout/       # 레이아웃 컴포넌트
 │   │   ├── schedule/     # 스케줄 관련 컴포넌트
 │   │   └── ui/           # shadcn/ui 컴포넌트
 │   ├── lib/              # 유틸리티 함수
+│   │   └── prisma.ts     # Prisma 클라이언트
 │   ├── stores/           # Zustand 스토어
 │   └── types/            # TypeScript 타입 정의
-├── Dockerfile            # Next.js Docker 설정
-├── Dockerfile.pocketbase # PocketBase Docker 설정
+├── Dockerfile            # Docker 설정
 └── docker-compose.yml    # Docker Compose 설정
 ```
+
+## 🔧 API 엔드포인트
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/projects` | 모든 프로젝트 조회 |
+| POST | `/api/projects` | 새 프로젝트 생성 |
+| GET | `/api/projects/[id]` | 단일 프로젝트 조회 |
+| PATCH | `/api/projects/[id]` | 프로젝트 수정 |
+| DELETE | `/api/projects/[id]` | 프로젝트 삭제 |
+| GET | `/api/projects/[id]/schedules` | 프로젝트의 일촬표 목록 |
+| POST | `/api/projects/[id]/schedules` | 새 일촬표 생성 |
+| GET | `/api/schedules/[id]` | 단일 일촬표 조회 (씬, 타임라인 포함) |
+| PATCH | `/api/schedules/[id]` | 일촬표 수정 |
+| DELETE | `/api/schedules/[id]` | 일촬표 삭제 |
+| GET | `/api/schedules/[id]/scenes` | 일촬표의 씬 목록 |
+| POST | `/api/schedules/[id]/scenes` | 새 씬 생성 |
+| PATCH | `/api/scenes/[id]` | 씬 수정 |
+| DELETE | `/api/scenes/[id]` | 씬 삭제 |
+| POST | `/api/scenes/reorder` | 씬 순서 변경 |
 
 ## 📝 라이선스
 

@@ -1,0 +1,229 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =====================
+// 프로젝트 (영화/작품)
+// =====================
+model Project {
+  id                String    @id @default(cuid())
+  title             String    // 작품명
+  director          String    // 감독
+  producer          String    // PD
+  assistantDirector String    // 조연출
+  description       String?   // 작품 설명
+  startDate         DateTime? // 촬영 시작 예정일
+  endDate           DateTime? // 촬영 종료 예정일
+  status            ProjectStatus @default(PREP)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relations
+  schedules         DailySchedule[]
+  staff             Staff[]
+  casts             Cast[]
+}
+
+enum ProjectStatus {
+  PREP
+  SHOOTING
+  POST
+  COMPLETED
+}
+
+// =====================
+// 일일촬영계획표
+// =====================
+model DailySchedule {
+  id                   String   @id @default(cuid())
+  projectId            String
+  
+  // 기본 정보
+  shootingDate         DateTime // 촬영일
+  episode              Int      // 회차 (몇 번째 촬영일)
+  
+  // 시간 정보
+  gatherTime           String   // 집합시간 (HH:mm)
+  shootingEndTime      String   // 예상 종료시간 (HH:mm)
+  
+  // 장소 정보
+  shootingLocation     String   // 촬영장소 주소
+  shootingLocationName String   // 촬영장소 이름
+  gatherLocation       String   // 집합장소
+  gatherLocationName   String   // 집합장소 이름
+  
+  // 날씨 정보
+  weatherCondition     String?  // 날씨
+  minTemp              Int?     // 최저온도
+  maxTemp              Int?     // 최고온도
+  rainProbability      Int?     // 강수확률 (%)
+  sunrise              String?  // 일출시간 (HH:mm)
+  sunset               String?  // 일몰시간 (HH:mm)
+  
+  // 기타
+  notes                String?  // 기타사항
+  
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  
+  // Relations
+  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scenes               Scene[]
+  timeline             TimelineItem[]
+  
+  @@index([projectId])
+}
+
+// =====================
+// 촬영 씬
+// =====================
+model Scene {
+  id                String      @id @default(cuid())
+  scheduleId        String
+  
+  order             Int         // 촬영 순서
+  sceneNumber       String      // 씬 번호 (S#1, S#2...)
+  
+  // 시간대
+  timeOfDay         TimeOfDay   @default(D)
+  locationType      LocationType @default(I)
+  
+  // 시간
+  startTime         String      // 예상 시작시간 (HH:mm)
+  endTime           String      // 예상 종료시간 (HH:mm)
+  estimatedDuration Int         // 예상 소요시간 (분)
+  
+  // 내용
+  location          String      // 촬영장소
+  description       String      // 촬영내용
+  mainCharacters    String[]    // 주요인물 배열
+  remarks           String?     // 비고
+  
+  // 컷 정보 (JSON으로 저장)
+  cuts              Json        @default("[]")
+  
+  status            SceneStatus @default(PENDING)
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relations
+  schedule          DailySchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  
+  @@index([scheduleId])
+}
+
+enum TimeOfDay {
+  M
+  D
+  E
+  N
+}
+
+enum LocationType {
+  I
+  E
+}
+
+enum SceneStatus {
+  PENDING
+  SHOOTING
+  OK
+  NG
+  SKIP
+}
+
+// =====================
+// 전체일정 타임라인
+// =====================
+model TimelineItem {
+  id          String       @id @default(cuid())
+  scheduleId  String
+  
+  order       Int          // 정렬 순서
+  time        String       // 시작 시간 (HH:mm)
+  endTime     String?      // 종료 시간 (HH:mm)
+  title       String       // 일정명
+  description String?      // 상세 내용
+  type        TimelineType @default(OTHER)
+  
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  // Relations
+  schedule    DailySchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  
+  @@index([scheduleId])
+}
+
+enum TimelineType {
+  GATHER
+  MEAL
+  SHOOTING
+  BREAK
+  WRAP
+  OTHER
+}
+
+// =====================
+// 스태프
+// =====================
+model Staff {
+  id         String         @id @default(cuid())
+  projectId  String
+  
+  name       String         // 이름
+  department DepartmentType // 부서
+  position   String         // 직책
+  phone      String         // 연락처
+  email      String?
+  
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  
+  // Relations
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  @@index([projectId])
+}
+
+enum DepartmentType {
+  DIRECTING
+  CAMERA
+  LIGHTING
+  SOUND
+  ART
+  PRODUCTION
+  MAKEUP
+  COSTUME
+  OTHER
+}
+
+// =====================
+// 캐스트 (배우)
+// =====================
+model Cast {
+  id        String   @id @default(cuid())
+  projectId String
+  
+  role      String   // 배역명
+  actorName String   // 연기자 이름
+  phone     String   // 연락처
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  @@index([projectId])
+}
